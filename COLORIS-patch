@@ -1,0 +1,1522 @@
+diff -upNr -x '*.pdf' linux-3.8.8/arch/x86/mm/tlb.c linux-3.8.8-color/arch/x86/mm/tlb.c
+--- linux-3.8.8/arch/x86/mm/tlb.c	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/arch/x86/mm/tlb.c	2014-06-10 13:19:59.381324000 -0400
+@@ -253,6 +253,8 @@ void flush_tlb_page(struct vm_area_struc
+ 
+ 	preempt_enable();
+ }
++/* --YY-- */
++EXPORT_SYMBOL(flush_tlb_page);
+ 
+ static void do_flush_tlb_all(void *info)
+ {
+diff -upNr -x '*.pdf' linux-3.8.8/fs/exec.c linux-3.8.8-color/fs/exec.c
+--- linux-3.8.8/fs/exec.c	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/fs/exec.c	2014-06-23 17:32:35.151028000 -0400
+@@ -66,6 +66,9 @@
+ 
+ #include <trace/events/sched.h>
+ 
++/* --YY-- */
++#include <linux/color_alloc.h>
++
+ int suid_dumpable = 0;
+ 
+ static LIST_HEAD(formats);
+@@ -1447,6 +1450,11 @@ int search_binary_handler(struct linux_b
+ 
+ EXPORT_SYMBOL(search_binary_handler);
+ 
++#ifdef NEW_ALLOC
++/* --YY-- */
++extern void (*assign_colors)(struct mm_struct *mm);
++#endif
++
+ /*
+  * sys_execve() executes a new program.
+  */
+@@ -1547,6 +1555,12 @@ static int do_execve_common(const char *
+ 	free_bprm(bprm);
+ 	if (displaced)
+ 		put_files_struct(displaced);
++#ifdef NEW_ALLOC
++	/* --YY-- */
++	if (assign_colors != NULL)
++		assign_colors(current->mm);
++	else current->mm->color_num = 0;
++#endif
+ 	return retval;
+ 
+ out:
+diff -upNr -x '*.pdf' linux-3.8.8/fs/ext4/inode.c linux-3.8.8-color/fs/ext4/inode.c
+--- linux-3.8.8/fs/ext4/inode.c	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/fs/ext4/inode.c	2014-06-23 17:33:50.924416000 -0400
+@@ -37,6 +37,8 @@
+ #include <linux/printk.h>
+ #include <linux/slab.h>
+ #include <linux/ratelimit.h>
++/* --YY-- */
++#include <linux/color_alloc.h>
+ 
+ #include "ext4_jbd2.h"
+ #include "xattr.h"
+@@ -2531,6 +2533,11 @@ static int ext4_nonda_switch(struct supe
+ 	return 0;
+ }
+ 
++/* --YY-- */
++#ifdef NEW_ALLOC
++extern int (*check_apps)(struct file *filp);
++#endif
++
+ static int ext4_da_write_begin(struct file *file, struct address_space *mapping,
+ 			       loff_t pos, unsigned len, unsigned flags,
+ 			       struct page **pagep, void **fsdata)
+@@ -2579,7 +2586,16 @@ retry:
+ 	 * started */
+ 	flags |= AOP_FLAG_NOFS;
+ 
++#ifdef NEW_ALLOC
++	/* --YY-- */
++	if ((unsigned int)(*pagep) == 0xFFFFFFFF)
++		page = color_grab_cache_page_write_begin(mapping, index, flags, 
++							file);
++	else
++		page = grab_cache_page_write_begin(mapping, index, flags);
++#else
+ 	page = grab_cache_page_write_begin(mapping, index, flags);
++#endif
+ 	if (!page) {
+ 		ext4_journal_stop(handle);
+ 		ret = -ENOMEM;
+diff -upNr -x '*.pdf' linux-3.8.8/include/linux/color_alloc.h linux-3.8.8-color/include/linux/color_alloc.h
+--- linux-3.8.8/include/linux/color_alloc.h	1969-12-31 19:00:00.000000000 -0500
++++ linux-3.8.8-color/include/linux/color_alloc.h	2014-06-09 14:21:15.054781000 -0400
+@@ -0,0 +1,25 @@
++/* --YY-- */
++#ifndef _LINUX_COLOR_ALLOC_H
++#define _LINUX_COLOR_ALLOC_H
++
++#define NEW_ALLOC
++
++#ifdef NEW_ALLOC
++#define COLOR_BASE 64
++
++struct color_set {
++	/* colors assigned are stored from the beginning */
++	short colors[COLOR_BASE];
++};
++
++/* for recolor_flag */
++#define REC_NONE 0
++#define REC_EXP_NOW 1
++#define REC_EXP_PEND 2
++#define REC_EXP_DONE 3
++#define REC_EXP 4
++
++
++#endif
++
++#endif
+diff -upNr -x '*.pdf' linux-3.8.8/include/linux/highmem.h linux-3.8.8-color/include/linux/highmem.h
+--- linux-3.8.8/include/linux/highmem.h	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/include/linux/highmem.h	2014-06-23 17:35:52.568241000 -0400
+@@ -7,6 +7,8 @@
+ #include <linux/mm.h>
+ #include <linux/uaccess.h>
+ #include <linux/hardirq.h>
++/* --YY-- */
++#include <linux/color_alloc.h>
+ 
+ #include <asm/cacheflush.h>
+ 
+@@ -167,6 +169,11 @@ __alloc_zeroed_user_highpage(gfp_t movab
+ }
+ #endif
+ 
++#ifdef NEW_ALLOC
++/* --YY-- */
++extern struct page * (*colored_alloc)(struct mm_struct *mm, int zero);
++#endif
++
+ /**
+  * alloc_zeroed_user_highpage_movable - Allocate a zeroed HIGHMEM page for a VMA that the caller knows can move
+  * @vma: The VMA the page is to be allocated for
+@@ -179,7 +186,21 @@ static inline struct page *
+ alloc_zeroed_user_highpage_movable(struct vm_area_struct *vma,
+ 					unsigned long vaddr)
+ {
++#ifdef NEW_ALLOC
++	/* --YY-- */
++	if (colored_alloc == NULL) {
++		return __alloc_zeroed_user_highpage(__GFP_MOVABLE, vma, vaddr);
++	}
++	else {
++		struct page *new_pg = colored_alloc(vma->vm_mm, 1);
++		if (unlikely(new_pg == NULL))
++			return __alloc_zeroed_user_highpage(__GFP_MOVABLE, vma, vaddr);
++		else
++			return new_pg;
++	}
++#else
+ 	return __alloc_zeroed_user_highpage(__GFP_MOVABLE, vma, vaddr);
++#endif
+ }
+ 
+ static inline void clear_highpage(struct page *page)
+diff -upNr -x '*.pdf' linux-3.8.8/include/linux/mm.h linux-3.8.8-color/include/linux/mm.h
+--- linux-3.8.8/include/linux/mm.h	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/include/linux/mm.h	2014-06-09 14:22:06.398466000 -0400
+@@ -17,6 +17,8 @@
+ #include <linux/pfn.h>
+ #include <linux/bit_spinlock.h>
+ #include <linux/shrinker.h>
++/* --YY-- */
++#include <linux/color_alloc.h>
+ 
+ struct mempolicy;
+ struct anon_vma;
+@@ -1551,6 +1553,26 @@ void page_cache_async_readahead(struct a
+ 				pgoff_t offset,
+ 				unsigned long size);
+ 
++#ifdef NEW_ALLOC
++/* --YY-- */
++void color_page_cache_sync_readahead(struct address_space *mapping,
++			       struct file_ra_state *ra,
++			       struct file *filp,
++			       pgoff_t offset,
++			       unsigned long size);
++
++void color_page_cache_async_readahead(struct address_space *mapping,
++				struct file_ra_state *ra,
++				struct file *filp,
++				struct page *pg,
++				pgoff_t offset,
++				unsigned long size);
++
++unsigned long color_ra_submit(struct file_ra_state *ra,
++			struct address_space *mapping,
++			struct file *filp);
++#endif
++
+ unsigned long max_sane_readahead(unsigned long nr);
+ unsigned long ra_submit(struct file_ra_state *ra,
+ 			struct address_space *mapping,
+diff -upNr -x '*.pdf' linux-3.8.8/include/linux/mm_types.h linux-3.8.8-color/include/linux/mm_types.h
+--- linux-3.8.8/include/linux/mm_types.h	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/include/linux/mm_types.h	2014-06-10 13:39:29.850415000 -0400
+@@ -14,6 +14,8 @@
+ #include <linux/uprobes.h>
+ #include <asm/page.h>
+ #include <asm/mmu.h>
++/* --YY-- */
++#include <linux/color_alloc.h>
+ 
+ #ifndef AT_VECTOR_SIZE_ARCH
+ #define AT_VECTOR_SIZE_ARCH 0
+@@ -322,6 +324,19 @@ struct mm_rss_stat {
+ };
+ 
+ struct mm_struct {
++#ifdef NEW_ALLOC
++	/* --YY-- */
++	int color_num;
++	/* round robin for picking a color */
++	int color_cur;
++	struct color_set my_colors;
++	short h_thred, l_thred;
++	unsigned char recolor_flag;	
++	unsigned long total_ref;		
++	unsigned long total_miss;		
++	unsigned int recolor_count;		
++	spinlock_t cur_lock;
++#endif
+ 	struct vm_area_struct * mmap;		/* list of VMAs */
+ 	struct rb_root mm_rb;
+ 	struct vm_area_struct * mmap_cache;	/* last find_vma result */
+diff -upNr -x '*.pdf' linux-3.8.8/include/linux/pagemap.h linux-3.8.8-color/include/linux/pagemap.h
+--- linux-3.8.8/include/linux/pagemap.h	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/include/linux/pagemap.h	2014-06-09 14:24:48.126763000 -0400
+@@ -14,6 +14,8 @@
+ #include <linux/bitops.h>
+ #include <linux/hardirq.h> /* for in_interrupt() */
+ #include <linux/hugetlb_inline.h>
++/* --YY-- */
++#include <linux/color_alloc.h>
+ 
+ /*
+  * Bits in mapping->flags.  The lower __GFP_BITS_SHIFT bits are the page
+@@ -259,6 +261,12 @@ unsigned find_get_pages_tag(struct addre
+ struct page *grab_cache_page_write_begin(struct address_space *mapping,
+ 			pgoff_t index, unsigned flags);
+ 
++#ifdef NEW_ALLOC
++/* --YY-- */
++struct page *color_grab_cache_page_write_begin(struct address_space *mapping,
++			pgoff_t index, unsigned flags, struct file *filp);
++#endif
++
+ /*
+  * Returns locked page at given index in given cache, creating it if needed.
+  */
+diff -upNr -x '*.pdf' linux-3.8.8/kernel/exit.c linux-3.8.8-color/kernel/exit.c
+--- linux-3.8.8/kernel/exit.c	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/kernel/exit.c	2014-06-09 11:09:24.842690000 -0400
+@@ -53,6 +53,8 @@
+ #include <linux/oom.h>
+ #include <linux/writeback.h>
+ #include <linux/shm.h>
++/* --YY-- */
++#include <linux/color_alloc.h>
+ 
+ #include <asm/uaccess.h>
+ #include <asm/unistd.h>
+@@ -444,6 +446,11 @@ assign_new_owner:
+ }
+ #endif /* CONFIG_MM_OWNER */
+ 
++#ifdef NEW_ALLOC
++/* --YY-- */
++extern void (*color_collect)(struct mm_struct *mm);
++#endif
++
+ /*
+  * Turn us into a lazy TLB process if we
+  * aren't already..
+@@ -453,6 +460,11 @@ static void exit_mm(struct task_struct *
+ 	struct mm_struct *mm = tsk->mm;
+ 	struct core_state *core_state;
+ 
++#ifdef NEW_ALLOC
++	/* --YY-- */
++	if(mm != NULL && mm->color_num != 0 && color_collect != NULL)
++		color_collect(mm);
++#endif
+ 	mm_release(tsk, mm);
+ 	if (!mm)
+ 		return;
+diff -upNr -x '*.pdf' linux-3.8.8/kernel/fork.c linux-3.8.8-color/kernel/fork.c
+--- linux-3.8.8/kernel/fork.c	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/kernel/fork.c	2014-06-10 13:32:35.230931000 -0400
+@@ -80,6 +80,9 @@
+ 
+ #include <trace/events/sched.h>
+ 
++/* --YY-- */
++#include <linux/color_alloc.h>
++
+ #define CREATE_TRACE_POINTS
+ #include <trace/events/task.h>
+ 
+@@ -94,6 +97,10 @@ int max_threads;		/* tunable limit on nr
+ DEFINE_PER_CPU(unsigned long, process_counts) = 0;
+ 
+ __cacheline_aligned DEFINE_RWLOCK(tasklist_lock);  /* outer */
++/* --YY-- */
++#ifdef NEW_ALLOC
++EXPORT_SYMBOL(tasklist_lock);
++#endif
+ 
+ #ifdef CONFIG_PROVE_RCU
+ int lockdep_tasklist_lock_is_held(void)
+@@ -544,6 +551,11 @@ static struct mm_struct *mm_init(struct 
+ 	mm_init_aio(mm);
+ 	mm_init_owner(mm, p);
+ 
++#ifdef NEW_ALLOC
++	/* --YY-- */
++	spin_lock_init(&mm->cur_lock);
++#endif
++
+ 	if (likely(!mm_alloc_pgd(mm))) {
+ 		mm->def_flags = 0;
+ 		mmu_notifier_mm_init(mm);
+diff -upNr -x '*.pdf' linux-3.8.8/kernel/pid.c linux-3.8.8-color/kernel/pid.c
+--- linux-3.8.8/kernel/pid.c	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/kernel/pid.c	2014-06-10 12:26:32.127307000 -0400
+@@ -37,6 +37,8 @@
+ #include <linux/init_task.h>
+ #include <linux/syscalls.h>
+ #include <linux/proc_fs.h>
++/* --YY-- */
++#include <linux/color_alloc.h>
+ 
+ #define pid_hashfn(nr, ns)	\
+ 	hash_long((unsigned long)nr + (unsigned long)ns, pidhash_shift)
+@@ -451,6 +453,10 @@ struct task_struct *find_task_by_vpid(pi
+ {
+ 	return find_task_by_pid_ns(vnr, task_active_pid_ns(current));
+ }
++/* --YY-- */
++#ifdef NEW_ALLOC
++EXPORT_SYMBOL(find_task_by_vpid);
++#endif
+ 
+ struct pid *get_task_pid(struct task_struct *task, enum pid_type type)
+ {
+diff -upNr -x '*.pdf' linux-3.8.8/kernel/sched/core.c linux-3.8.8-color/kernel/sched/core.c
+--- linux-3.8.8/kernel/sched/core.c	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/kernel/sched/core.c	2014-06-24 13:11:52.955548000 -0400
+@@ -73,6 +73,12 @@
+ #include <linux/init_task.h>
+ #include <linux/binfmts.h>
+ #include <linux/context_tracking.h>
++/* --YY-- */
++#include <linux/color_alloc.h>
++
++#ifdef NEW_ALLOC
++#include <asm/msr.h>
++#endif
+ 
+ #include <asm/switch_to.h>
+ #include <asm/tlb.h>
+@@ -2843,6 +2849,163 @@ pick_next_task(struct rq *rq)
+ 	BUG(); /* the idle class will always have a runnable task */
+ }
+ 
++#ifdef NEW_ALLOC
++/* --YY-- */
++extern int (*recolor_mm)(struct mm_struct *mm, int isExpand);
++extern void (*finish_recolor)(struct mm_struct *mm);
++extern void (*collect_inst)(struct task_struct *task);
++extern int cmr_high_threshold;
++extern int cmr_low_threshold;
++extern int recolor_delay;
++
++static int isHot[NR_CPUS], isCold[NR_CPUS];
++static int needBack = 0;
++static DEFINE_SPINLOCK(mylock);
++
++unsigned int sample_stages[NR_CPUS];
++EXPORT_SYMBOL(sample_stages);
++
++
++/* LLC misses */
++static const unsigned int select_msr_miss = 0x2E | (0x41 << 8) | (0x01 << 16)
++					| (0x01 << 22);
++/* LLC refs */
++static const unsigned int select_msr_ref = 0x2E | (0x4F << 8) | (0x01 << 16) 
++					| (0x01 << 22);
++/* Inst retired */
++static const unsigned int select_msr_inst = 0xC0 | (0x00 << 8) | (0x01 << 16) 
++                                          | (0x01 << 22);
++
++
++static inline void start_cmr_counting(struct task_struct *task)
++{		
++	wrmsr(0x186, select_msr_miss, 0);
++	wrmsr(0xC1, 0, 0);
++
++	wrmsr(0x187, select_msr_ref, 0);
++	wrmsr(0xC2, 0, 0);
++
++	if (sample_stages[smp_processor_id()] > 0) {
++		wrmsr(0x188, select_msr_inst, 0);
++		wrmsr(0xC3, 0, 0);
++	}
++
++	if (task->mm->recolor_flag == REC_EXP_NOW) {
++		if (recolor_mm(task->mm, 1) == 2) {
++			/* can't use trylock here, otherwise request may be lost */
++			spin_lock(&mylock);
++			needBack = 1;
++			spin_unlock(&mylock);
++		}
++	}
++	else if (task->mm->recolor_flag == REC_EXP_DONE)
++		finish_recolor(task->mm);
++}
++
++static inline void end_cmr_counting(struct task_struct *task)
++{
++	unsigned int ref, high, miss, cmr, sig, i;
++	struct mm_struct *mm = task->mm;
++	int cpu = smp_processor_id();	
++
++	/* assuming counters doesn't overflow with 32 bits */
++	rdmsr(0xC1, miss, high);
++	rdmsr(0xC2, ref, high);
++
++	/* the actual number is shrinked by some lower bits */
++	mm->total_ref += (ref >> 4);
++	mm->total_miss += (miss >> 4);
++
++	if (sample_stages[cpu] > 0)
++		collect_inst(task);
++	else {
++		memset(isHot, 0, sizeof(int)*NR_CPUS);
++		memset(isCold, 0, sizeof(int)*NR_CPUS);
++		needBack = 0;
++	}
++
++	if (unlikely(mm->recolor_flag == REC_EXP_PEND))
++		return;	
++
++	/* strictly speaking, should handle counter overflow for sample_stages */
++	if (mm->recolor_count >= sample_stages[cpu]) return;
++	else {
++		mm->recolor_count = sample_stages[cpu];
++
++		cmr = (mm->total_ref >> 8) ? (100 * (mm->total_miss >> 8)) / 
++			(mm->total_ref >> 8) : 0;
++
++		mm->total_ref = 0;
++		mm->total_miss = 0;
++
++		/* FIXME: not generic, just for the experiment with 8 programs running on 4 cores */
++		if (spin_trylock(&mylock)) {
++			if (needBack) {
++				i = recolor_mm(mm, 2);
++				if (i == 1) needBack = 0;
++
++				if (i != 0) {
++					spin_unlock(&mylock);
++					return;
++				}
++			}
++			spin_unlock(&mylock);
++		}
++	}
++
++	if ((mm->h_thred < 0 && cmr > cmr_high_threshold) || 
++		(mm->h_thred >= 0 && cmr > mm->h_thred)) {
++		/* FIXME: hard-coded cache section size (COLOR_NUM / NUM_CORES): 16 */
++		if (mm->color_num < 16) {
++			mm->recolor_count += recolor_delay;
++			mm->recolor_flag = REC_EXP_NOW;
++			return;
++		}
++
++		if (!spin_trylock(&mylock)) return;
++		sig = 0;
++		for (i = 0; i < NR_CPUS; i++) {
++			if(isCold[i] && i != cpu) {
++				sig = 1;
++				break;
++			}
++		}
++		if (!sig) {
++			isHot[cpu] = 1;
++			spin_unlock(&mylock);
++			return;
++		}
++		mm->recolor_count += recolor_delay;
++		/* FIXME: hard-coded MAX_COLORS: 48 */
++		if (mm->color_num <= 44) {
++			mm->recolor_flag = REC_EXP_NOW;
++			isCold[i] = 0;
++		}
++		spin_unlock(&mylock);
++	}
++	else if ((mm->l_thred < 0 && cmr < cmr_low_threshold) || 
++		(mm->l_thred >= 0 && cmr < mm->l_thred)) {
++		if (!spin_trylock(&mylock)) return;
++		sig = 0;
++		for (i = 0; i < NR_CPUS; i++) {
++			if (isHot[i] && i != cpu) {
++				sig = 1;
++				break;
++			}
++		}
++		if (sig) {
++			if (!recolor_mm(mm, 0)) {
++				mm->recolor_count += recolor_delay;
++
++				isHot[i] = 0;
++				isCold[cpu] = 1;
++			}
++		}
++		spin_unlock(&mylock);
++	}
++}
++#endif
++
+ /*
+  * __schedule() is the main scheduler function.
+  *
+@@ -2940,7 +3103,22 @@ need_resched:
+ 		rq->curr = next;
+ 		++*switch_count;
+ 
++#ifdef NEW_ALLOC
++		/* --YY-- */
++		if (prev->mm != NULL && prev->mm->color_num != 0 
++			&& recolor_mm != NULL)
++			end_cmr_counting(prev);
++#endif
++
+ 		context_switch(rq, prev, next); /* unlocks the rq */
++
++#ifdef NEW_ALLOC
++		/* --YY-- */
++		/* next might be invalid after stack switch */
++		if (current->mm != NULL && current->mm->color_num != 0 
++			&& recolor_mm != NULL)
++			start_cmr_counting(current);
++#endif
+ 		/*
+ 		 * The context switch have flipped the stack from under us
+ 		 * and restored the local variables which were saved when
+@@ -4137,6 +4315,10 @@ out_put_task:
+ 	put_online_cpus();
+ 	return retval;
+ }
++#ifdef NEW_ALLOC
++/* --YY-- */
++EXPORT_SYMBOL(sched_setaffinity);
++#endif
+ 
+ static int get_user_cpu_mask(unsigned long __user *user_mask_ptr, unsigned len,
+ 			     struct cpumask *new_mask)
+diff -upNr -x '*.pdf' linux-3.8.8/mm/filemap.c linux-3.8.8-color/mm/filemap.c
+--- linux-3.8.8/mm/filemap.c	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/mm/filemap.c	2014-06-23 17:38:53.097925000 -0400
+@@ -34,6 +34,8 @@
+ #include <linux/memcontrol.h>
+ #include <linux/cleancache.h>
+ #include "internal.h"
++/* --YY-- */
++#include <linux/color_alloc.h>
+ 
+ /*
+  * FIXME: remove all knowledge of the buffer layer from the core VM
+@@ -1473,6 +1475,13 @@ out:
+ }
+ EXPORT_SYMBOL(generic_file_aio_read);
+ 
++/* --YY-- */
++#ifdef NEW_ALLOC
++extern struct page * (*colored_alloc)(struct mm_struct *mm, int zero);
++extern struct page * (*colored_alloc_file)(struct file *filp);
++extern int (*check_apps)(struct file *filp);
++#endif
++
+ #ifdef CONFIG_MMU
+ /**
+  * page_cache_read - adds requested page to the page cache if not already there
+@@ -1482,6 +1491,37 @@ EXPORT_SYMBOL(generic_file_aio_read);
+  * This adds the requested page to the page cache if it isn't already there,
+  * and schedules an I/O to read in its contents from disk.
+  */
++/* --YY-- */
++#ifdef NEW_ALLOC
++static int page_cache_read(struct file *file, pgoff_t offset, int color_on)
++{
++	struct address_space *mapping = file->f_mapping;
++	struct page *page; 
++	int ret;
++
++	do {
++		if (color_on) {
++			page = colored_alloc(current->mm, 0);
++			if (page) goto NEXT_C;
++		}
++
++		page = page_cache_alloc_cold(mapping);
++		if (!page)
++			return -ENOMEM;
++NEXT_C:
++		ret = add_to_page_cache_lru(page, mapping, offset, GFP_KERNEL);
++		if (ret == 0)
++			ret = mapping->a_ops->readpage(file, page);
++		else if (ret == -EEXIST)
++			ret = 0; /* losing race to add is OK */
++
++		page_cache_release(page);
++
++	} while (ret == AOP_TRUNCATED_PAGE);
++		
++	return ret;
++}
++#else
+ static int page_cache_read(struct file *file, pgoff_t offset)
+ {
+ 	struct address_space *mapping = file->f_mapping;
+@@ -1505,6 +1545,7 @@ static int page_cache_read(struct file *
+ 		
+ 	return ret;
+ }
++#endif
+ 
+ #define MMAP_LOTSAMISS  (100)
+ 
+@@ -1512,6 +1553,57 @@ static int page_cache_read(struct file *
+  * Synchronous readahead happens when we don't even find
+  * a page in the page cache at all.
+  */
++/* --YY-- */
++#ifdef NEW_ALLOC
++static void do_sync_mmap_readahead(struct vm_area_struct *vma,
++				   struct file_ra_state *ra,
++				   struct file *file,
++				   pgoff_t offset,
++				   int color_on)
++{
++	unsigned long ra_pages;
++	struct address_space *mapping = file->f_mapping;
++
++	/* If we don't want any read-ahead, don't bother */
++	if (VM_RandomReadHint(vma))
++		return;
++	if (!ra->ra_pages)
++		return;
++
++	if (VM_SequentialReadHint(vma)) {
++		if (color_on) {
++			color_page_cache_sync_readahead(mapping, ra, file, offset,
++					  ra->ra_pages);
++		}
++		else {
++			page_cache_sync_readahead(mapping, ra, file, offset,
++					  ra->ra_pages);
++		}
++		return;
++	}
++
++	/* Avoid banging the cache line if not needed */
++	if (ra->mmap_miss < MMAP_LOTSAMISS * 10)
++		ra->mmap_miss++;
++
++	/*
++	 * Do we miss much more than hit in this file? If so,
++	 * stop bothering with read-ahead. It will only hurt.
++	 */
++	if (ra->mmap_miss > MMAP_LOTSAMISS)
++		return;
++
++	/*
++	 * mmap read-around
++	 */
++	ra_pages = max_sane_readahead(ra->ra_pages);
++	ra->start = max_t(long, 0, offset - ra_pages / 2);
++	ra->size = ra_pages;
++	ra->async_size = ra_pages / 4;
++	if (color_on) color_ra_submit(ra, mapping, file);
++	else ra_submit(ra, mapping, file);
++}
++#else
+ static void do_sync_mmap_readahead(struct vm_area_struct *vma,
+ 				   struct file_ra_state *ra,
+ 				   struct file *file,
+@@ -1552,11 +1644,38 @@ static void do_sync_mmap_readahead(struc
+ 	ra->async_size = ra_pages / 4;
+ 	ra_submit(ra, mapping, file);
+ }
++#endif
+ 
+ /*
+  * Asynchronous readahead happens when we find the page and PG_readahead,
+  * so we want to possibly extend the readahead further..
+  */
++/* --YY-- */
++#ifdef NEW_ALLOC
++static void do_async_mmap_readahead(struct vm_area_struct *vma,
++				    struct file_ra_state *ra,
++				    struct file *file,
++				    struct page *page,
++				    pgoff_t offset,
++				    int color_on)
++{
++	struct address_space *mapping = file->f_mapping;
++
++	/* If we don't want any read-ahead, don't bother */
++	if (VM_RandomReadHint(vma))
++		return;
++	if (ra->mmap_miss > 0)
++		ra->mmap_miss--;
++	if (PageReadahead(page)) {
++		if (color_on)
++			color_page_cache_async_readahead(mapping, ra, file,
++					   page, offset, ra->ra_pages);
++		else
++			page_cache_async_readahead(mapping, ra, file,
++					   page, offset, ra->ra_pages);
++	}
++}
++#else
+ static void do_async_mmap_readahead(struct vm_area_struct *vma,
+ 				    struct file_ra_state *ra,
+ 				    struct file *file,
+@@ -1574,6 +1693,7 @@ static void do_async_mmap_readahead(stru
+ 		page_cache_async_readahead(mapping, ra, file,
+ 					   page, offset, ra->ra_pages);
+ }
++#endif
+ 
+ /**
+  * filemap_fault - read in file data for page fault handling
+@@ -1599,6 +1719,13 @@ int filemap_fault(struct vm_area_struct 
+ 	pgoff_t size;
+ 	int ret = 0;
+ 
++#ifdef NEW_ALLOC
++	/* --YY-- */
++	int color_on = 0;
++	if ((unsigned int)(vmf->page) == 0xFFFFFFFF)
++		color_on = 1;
++#endif
++
+ 	size = (i_size_read(inode) + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
+ 	if (offset >= size)
+ 		return VM_FAULT_SIGBUS;
+@@ -1612,10 +1739,18 @@ int filemap_fault(struct vm_area_struct 
+ 		 * We found the page, so try async readahead before
+ 		 * waiting for the lock.
+ 		 */
++#ifdef NEW_ALLOC
++		do_async_mmap_readahead(vma, ra, file, page, offset, color_on);
++#else
+ 		do_async_mmap_readahead(vma, ra, file, page, offset);
++#endif
+ 	} else if (!page) {
+ 		/* No page in the page cache at all */
++#ifdef NEW_ALLOC
++		do_sync_mmap_readahead(vma, ra, file, offset, color_on);
++#else
+ 		do_sync_mmap_readahead(vma, ra, file, offset);
++#endif
+ 		count_vm_event(PGMAJFAULT);
+ 		mem_cgroup_count_vm_event(vma->vm_mm, PGMAJFAULT);
+ 		ret = VM_FAULT_MAJOR;
+@@ -1664,7 +1799,11 @@ no_cached_page:
+ 	 * We're only likely to ever get here if MADV_RANDOM is in
+ 	 * effect.
+ 	 */
++#ifdef NEW_ALLOC
++	error = page_cache_read(file, offset, color_on);
++#else
+ 	error = page_cache_read(file, offset);
++#endif
+ 
+ 	/*
+ 	 * The page we want has now been added to the page cache.
+@@ -2279,6 +2418,45 @@ found:
+ }
+ EXPORT_SYMBOL(grab_cache_page_write_begin);
+ 
++#ifdef NEW_ALLOC
++/* --YY-- */
++struct page *color_grab_cache_page_write_begin(struct address_space *mapping,
++					pgoff_t index, unsigned flags, struct file *filp)
++{
++	int status;
++	gfp_t gfp_mask;
++	struct page *page;
++	gfp_t gfp_notmask = 0;
++
++	gfp_mask = mapping_gfp_mask(mapping);
++	if (mapping_cap_account_dirty(mapping))
++		gfp_mask |= __GFP_WRITE;
++	if (flags & AOP_FLAG_NOFS)
++		gfp_notmask = __GFP_FS;
++repeat:
++	page = find_lock_page(mapping, index);
++	if (page)
++		goto found;
++
++	page = colored_alloc_file(filp);
++	if (!page) page = __page_cache_alloc(gfp_mask & ~gfp_notmask);
++	if (!page)
++		return NULL;
++	status = add_to_page_cache_lru(page, mapping, index,
++						GFP_KERNEL & ~gfp_notmask);
++	if (unlikely(status)) {
++		page_cache_release(page);
++		if (status == -EEXIST)
++			goto repeat;
++		return NULL;
++	}
++found:
++	wait_on_page_writeback(page);
++	return page;
++}
++EXPORT_SYMBOL(color_grab_cache_page_write_begin);
++#endif
++
+ static ssize_t generic_perform_write(struct file *file,
+ 				struct iov_iter *i, loff_t pos)
+ {
+@@ -2321,6 +2499,23 @@ again:
+ 			break;
+ 		}
+ 
++#ifdef NEW_ALLOC
++		/* --YY-- */
++		/* 
++ 		* XXX: this is only needed for running SPEC since runspec copies 
++ 		* program executables to new locations before running them
++ 		*/
++		if (check_apps != NULL) {
++			if (check_apps(file)) {
++				page = (struct page *)0xFFFFFFFF;
++				goto NEXT_W;
++			}
++		}
++		
++		page = NULL;
++NEXT_W:
++#endif
++
+ 		status = a_ops->write_begin(file, mapping, pos, bytes, flags,
+ 						&page, &fsdata);
+ 		if (unlikely(status))
+diff -upNr -x '*.pdf' linux-3.8.8/mm/init-mm.c linux-3.8.8-color/mm/init-mm.c
+--- linux-3.8.8/mm/init-mm.c	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/mm/init-mm.c	2014-06-09 15:19:36.381000000 -0400
+@@ -8,6 +8,8 @@
+ #include <linux/atomic.h>
+ #include <asm/pgtable.h>
+ #include <asm/mmu.h>
++/* --YY-- */
++#include <linux/color_alloc.h>
+ 
+ #ifndef INIT_MM_CONTEXT
+ #define INIT_MM_CONTEXT(name)
+@@ -21,5 +23,10 @@ struct mm_struct init_mm = {
+ 	.mmap_sem	= __RWSEM_INITIALIZER(init_mm.mmap_sem),
+ 	.page_table_lock =  __SPIN_LOCK_UNLOCKED(init_mm.page_table_lock),
+ 	.mmlist		= LIST_HEAD_INIT(init_mm.mmlist),
++#ifdef NEW_ALLOC
++	/* --YY-- */
++	.color_num	= 0,
++	.cur_lock       = __SPIN_LOCK_UNLOCKED(init_mm.cur_lock),
++#endif
+ 	INIT_MM_CONTEXT(init_mm)
+ };
+diff -upNr -x '*.pdf' linux-3.8.8/mm/memory.c linux-3.8.8-color/mm/memory.c
+--- linux-3.8.8/mm/memory.c	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/mm/memory.c	2014-06-23 17:40:52.137679000 -0400
+@@ -69,6 +69,48 @@
+ 
+ #include "internal.h"
+ 
++/* --YY-- */
++#include <linux/color_alloc.h>
++
++#ifdef NEW_ALLOC
++/* --YY-- */
++struct page * (*colored_alloc)(struct mm_struct *mm, int zero) = NULL;
++EXPORT_SYMBOL(colored_alloc);
++
++struct page * (*colored_alloc_file)(struct file *filp) = NULL;
++EXPORT_SYMBOL(colored_alloc_file);
++
++void (*assign_colors)(struct mm_struct *mm) = NULL;
++EXPORT_SYMBOL(assign_colors);
++
++int (*colored_free)(struct page *pg, struct zone *zone) = NULL;
++EXPORT_SYMBOL(colored_free);
++
++int (*check_apps)(struct file *filp) = NULL;
++EXPORT_SYMBOL(check_apps);
++
++int (*recolor_mm)(struct mm_struct *mm, int isExpand) = NULL;
++EXPORT_SYMBOL(recolor_mm);
++
++void (*color_collect)(struct mm_struct *mm) = NULL;
++EXPORT_SYMBOL(color_collect);
++
++void (*finish_recolor)(struct mm_struct *mm) = NULL;
++EXPORT_SYMBOL(finish_recolor);
++
++void (*collect_inst)(struct task_struct *task) = NULL;
++EXPORT_SYMBOL(collect_inst);
++
++int cmr_high_threshold = 100;
++EXPORT_SYMBOL(cmr_high_threshold);
++
++int cmr_low_threshold = 0;
++EXPORT_SYMBOL(cmr_low_threshold);
++
++int recolor_delay = 0;
++EXPORT_SYMBOL(recolor_delay);
++#endif
++
+ #ifndef CONFIG_NEED_MULTIPLE_NODES
+ /* use the per-pgdat data instead for discontigmem - mbligh */
+ unsigned long max_mapnr;
+@@ -403,6 +445,12 @@ void pmd_clear_bad(pmd_t *pmd)
+ 	pmd_ERROR(*pmd);
+ 	pmd_clear(pmd);
+ }
++#ifdef NEW_ALLOC
++/* --YY-- */
++EXPORT_SYMBOL(pgd_clear_bad);
++EXPORT_SYMBOL(pud_clear_bad);
++EXPORT_SYMBOL(pmd_clear_bad);
++#endif
+ 
+ /*
+  * Note: this doesn't free the actual pages themselves. That
+@@ -1120,7 +1168,10 @@ again:
+ 
+ 		if (pte_present(ptent)) {
+ 			struct page *page;
+-
++#ifdef NEW_ALLOC
++/* --YY-- */
++COLORED:
++#endif
+ 			page = vm_normal_page(vma, addr, ptent);
+ 			if (unlikely(details) && page) {
+ 				/*
+@@ -1168,6 +1219,17 @@ again:
+ 				break;
+ 			continue;
+ 		}
++#ifdef NEW_ALLOC
++		/* --YY-- */
++		else {
++			if (pte_special(ptent)) {
++				ptent = pte_set_flags(ptent, _PAGE_PRESENT);
++				ptent = pte_clear_flags(ptent, _PAGE_SPECIAL);
++				set_pte_at(mm, addr, pte, ptent);
++				goto COLORED;
++			}
++		}
++#endif
+ 		/*
+ 		 * If details->check_mapping, we leave swap entries;
+ 		 * if details->nonlinear_vma, we leave file entries.
+@@ -2707,7 +2769,19 @@ gotten:
+ 		if (!new_page)
+ 			goto oom;
+ 	} else {
++#ifdef NEW_ALLOC
++		/* --YY-- */
++		if (colored_alloc == NULL) {
++			new_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, address);
++		}
++		else {
++			new_page = colored_alloc(mm, 0);
++			if (unlikely(new_page == NULL))
++				new_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, address);
++		}
++#else
+ 		new_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, address);
++#endif
+ 		if (!new_page)
+ 			goto oom;
+ 		cow_user_page(new_page, old_page, address, vma);
+@@ -3232,7 +3306,21 @@ static int __do_fault(struct mm_struct *
+ 		if (unlikely(anon_vma_prepare(vma)))
+ 			return VM_FAULT_OOM;
+ 
++#ifdef NEW_ALLOC
++		/* --YY-- */
++		if (colored_alloc == NULL) {
++			cow_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE,
++					vma, address);
++		}
++		else {
++			cow_page = colored_alloc(mm, 0);
++			if (unlikely(cow_page == NULL))
++				cow_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE,
++						vma, address);
++		}
++#else
+ 		cow_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma, address);
++#endif
+ 		if (!cow_page)
+ 			return VM_FAULT_OOM;
+ 
+@@ -3248,6 +3336,14 @@ static int __do_fault(struct mm_struct *
+ 	vmf.flags = flags;
+ 	vmf.page = NULL;
+ 
++#ifdef NEW_ALLOC
++	/* --YY-- */
++	if (mm->color_num != 0 && address >= mm->start_code && 
++		address < mm->end_code) {
++		vmf.page = (struct page *)0xFFFFFFFF;
++	}
++#endif
++
+ 	ret = vma->vm_ops->fault(vma, &vmf);
+ 	if (unlikely(ret & (VM_FAULT_ERROR | VM_FAULT_NOPAGE |
+ 			    VM_FAULT_RETRY)))
+@@ -3601,6 +3697,128 @@ static int do_pmd_numa_page(struct mm_st
+ }
+ #endif /* CONFIG_NUMA_BALANCING */
+ 
++#ifdef NEW_ALLOC
++/* --YY-- */
++static unsigned long flag_mask = (1 << __NR_PAGEFLAGS) - 1;
++
++static int do_recolor_text(struct mm_struct *mm, struct vm_area_struct *vma,
++		unsigned long address, pte_t *page_table, pmd_t *pmd,
++		unsigned int flags)
++{
++	struct page *old_pg, *new_pg;
++	spinlock_t *ptl;
++	pte_t entry, old_entry;
++	pgoff_t offset;
++	unsigned long pg_flags;
++
++	new_pg = colored_alloc(mm, 0);
++	if(unlikely(!new_pg))
++		return VM_FAULT_OOM;
++	if(unlikely(!trylock_page(new_pg))) {
++		printk(KERN_ERR "%s: failed lock new page\n", __func__);
++		BUG();
++	}
++
++	page_table = pte_offset_map_lock(mm, pmd, address, &ptl);
++	old_entry = *page_table;
++	if(pte_present(old_entry))
++		goto release;
++
++	old_pg = pte_page(old_entry);
++
++	offset = old_pg->index;
++	pg_flags = old_pg->flags & flag_mask;
++
++	/* if can't lock page, give up recoloring */
++	if(unlikely(!trylock_page(old_pg))) {
++		goto keep;
++	}
++
++	page_cache_release(old_pg);
++	copy_user_highpage(new_pg, old_pg, address, vma);
++	new_pg->private = old_pg->private;
++	__SetPageUptodate(new_pg);	
++
++	page_remove_rmap(old_pg);
++	/* GFP_ATOMIC so that replace_page_cache_page won't block inside spinlock */
++	replace_page_cache_page(old_pg, new_pg, GFP_ATOMIC);
++	page_cache_get(new_pg);
++	unlock_page(old_pg);
++	unlock_page(new_pg);
++
++	list_replace_init(&old_pg->lru, &new_pg->lru);
++	old_pg->flags &= ~PAGE_FLAGS_CHECK_AT_PREP;
++	page_cache_release(old_pg);
++
++	page_add_file_rmap(new_pg);
++	new_pg->flags = (new_pg->flags & ~flag_mask) | pg_flags;
++
++	entry = mk_pte(new_pg, pte_pgprot(old_entry));
++	entry = pte_set_flags(entry, _PAGE_PRESENT);
++	entry = pte_clear_flags(entry, _PAGE_SPECIAL);
++	set_pte_at(mm, address, page_table, entry);
++	
++unlock:	
++	pte_unmap_unlock(page_table, ptl);	
++	return 0;
++
++keep:
++	old_entry = pte_set_flags(old_entry, _PAGE_PRESENT);
++	old_entry = pte_clear_flags(old_entry, _PAGE_SPECIAL);
++	set_pte_at(mm, address, page_table, entry);
++
++release:
++	unlock_page(new_pg);
++	page_cache_release(new_pg);
++	goto unlock;
++}
++
++/* recolor anonymous memory */
++static int do_recolor_page(struct mm_struct *mm, struct vm_area_struct *vma,
++		unsigned long address, pte_t *page_table, pmd_t *pmd,
++		unsigned int flags)
++{
++	struct page *old_pg, *new_pg;
++	spinlock_t *ptl;
++	pte_t entry, old_entry;
++
++	pte_unmap(page_table);
++	
++	if(vma->vm_ops)
++		return do_recolor_text(mm, vma, address, page_table, pmd, flags);
++
++	new_pg = colored_alloc(mm, 0);
++	if(unlikely(!new_pg))
++		return VM_FAULT_OOM;
++
++	page_table = pte_offset_map_lock(mm, pmd, address, &ptl);
++	old_entry = *page_table;
++	/* for concurrent accesses to the entry, only the first access recolors it */
++	if(pte_present(old_entry))
++		goto release;
++	
++	old_pg = pte_page(old_entry);
++	copy_user_highpage(new_pg, old_pg, address, vma);
++	__SetPageUptodate(new_pg);
++
++	page_remove_rmap(old_pg);
++	page_cache_release(old_pg);
++
++	page_add_new_anon_rmap(new_pg, vma, address);
++	entry = mk_pte(new_pg, pte_pgprot(old_entry));
++	entry = pte_set_flags(entry, _PAGE_PRESENT);
++	entry = pte_clear_flags(entry, _PAGE_SPECIAL);
++	set_pte_at(mm, address, page_table, entry);	
++
++unlock:
++	pte_unmap_unlock(page_table, ptl);
++	return 0; 
++release:
++	page_cache_release(new_pg);
++	goto unlock;
++}
++#endif
++
+ /*
+  * These routines also need to handle stuff like marking pages dirty
+  * and/or accessed for architectures that don't do it in hardware (most
+@@ -3632,6 +3850,11 @@ int handle_pte_fault(struct mm_struct *m
+ 			return do_anonymous_page(mm, vma, address,
+ 						 pte, pmd, flags);
+ 		}
++#ifdef NEW_ALLOC
++		/* --YY-- */
++		if (pte_special(entry))
++			return do_recolor_page(mm, vma, address, pte, pmd, flags);
++#endif
+ 		if (pte_file(entry))
+ 			return do_nonlinear_fault(mm, vma, address,
+ 					pte, pmd, flags, entry);
+diff -upNr -x '*.pdf' linux-3.8.8/mm/page_alloc.c linux-3.8.8-color/mm/page_alloc.c
+--- linux-3.8.8/mm/page_alloc.c	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/mm/page_alloc.c	2014-06-23 17:41:17.550473000 -0400
+@@ -63,6 +63,9 @@
+ #include <asm/div64.h>
+ #include "internal.h"
+ 
++/* --YY-- */
++#include <linux/color_alloc.h>
++
+ #ifdef CONFIG_USE_PERCPU_NUMA_NODE_ID
+ DEFINE_PER_CPU(int, numa_node);
+ EXPORT_PER_CPU_SYMBOL(numa_node);
+@@ -499,6 +502,11 @@ static inline int page_is_buddy(struct p
+ 	return 0;
+ }
+ 
++/* --YY-- */
++#ifdef NEW_ALLOC
++extern int (*colored_free)(struct page *pg, struct zone *zone);
++#endif
++
+ /*
+  * Freeing function for a buddy system allocator.
+  *
+@@ -1314,6 +1322,14 @@ void free_hot_cold_page(struct page *pag
+ 
+ 	migratetype = get_pageblock_migratetype(page);
+ 	set_freepage_migratetype(page, migratetype);
++#ifdef NEW_ALLOC
++	/* --YY-- */
++	if (colored_free != NULL) {
++		if (colored_free(page, zone)) {
++			return;
++		}
++	}
++#endif
+ 	local_irq_save(flags);
+ 	__count_vm_event(PGFREE);
+ 
+diff -upNr -x '*.pdf' linux-3.8.8/mm/readahead.c linux-3.8.8-color/mm/readahead.c
+--- linux-3.8.8/mm/readahead.c	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/mm/readahead.c	2014-06-23 17:42:18.076380000 -0400
+@@ -19,6 +19,8 @@
+ #include <linux/pagemap.h>
+ #include <linux/syscalls.h>
+ #include <linux/file.h>
++/* --YY-- */
++#include <linux/color_alloc.h>
+ 
+ /*
+  * Initialise a struct file's readahead state.  Assumes that the caller has
+@@ -141,6 +143,11 @@ out:
+ 	return ret;
+ }
+ 
++/* --YY-- */
++#ifdef NEW_ALLOC
++extern struct page * (*colored_alloc)(struct mm_struct *mm, int zero);
++#endif
++
+ /*
+  * __do_page_cache_readahead() actually reads a chunk of disk.  It allocates all
+  * the pages first, then submits them all for I/O. This avoids the very bad
+@@ -149,10 +156,11 @@ out:
+  *
+  * Returns the number of pages requested, or the maximum amount of I/O allowed.
+  */
++/* --YY-- */
+ static int
+ __do_page_cache_readahead(struct address_space *mapping, struct file *filp,
+ 			pgoff_t offset, unsigned long nr_to_read,
+-			unsigned long lookahead_size)
++			unsigned long lookahead_size, int color_on)
+ {
+ 	struct inode *inode = mapping->host;
+ 	struct page *page;
+@@ -181,10 +189,21 @@ __do_page_cache_readahead(struct address
+ 		rcu_read_unlock();
+ 		if (page)
+ 			continue;
++#ifdef NEW_ALLOC
++		if(color_on) {
++			page = colored_alloc(current->mm, 0);
++			if(page) goto NEXT;
++		}
+ 
+-		page = page_cache_alloc_readahead(mapping);
++		page = page_cache_alloc_cold(mapping);
+ 		if (!page)
+ 			break;
++NEXT:
++#else
++		page = page_cache_alloc_cold(mapping);
++		if (!page)
++			break;
++#endif	
+ 		page->index = page_offset;
+ 		list_add(&page->lru, &page_pool);
+ 		if (page_idx == nr_to_read - lookahead_size)
+@@ -224,8 +243,40 @@ int force_page_cache_readahead(struct ad
+ 
+ 		if (this_chunk > nr_to_read)
+ 			this_chunk = nr_to_read;
++		/* --YY-- */
++		err = __do_page_cache_readahead(mapping, filp,
++						offset, this_chunk, 0, 0);
++		if (err < 0) {
++			ret = err;
++			break;
++		}
++		ret += err;
++		offset += this_chunk;
++		nr_to_read -= this_chunk;
++	}
++	return ret;
++}
++
++#ifdef NEW_ALLOC
++/* --YY-- */
++int color_force_page_cache_readahead(struct address_space *mapping, struct file *filp,
++		pgoff_t offset, unsigned long nr_to_read)
++{
++	int ret = 0;
++
++	if (unlikely(!mapping->a_ops->readpage && !mapping->a_ops->readpages))
++		return -EINVAL;
++
++	nr_to_read = max_sane_readahead(nr_to_read);
++	while (nr_to_read) {
++		int err;
++
++		unsigned long this_chunk = (2 * 1024 * 1024) / PAGE_CACHE_SIZE;
++
++		if (this_chunk > nr_to_read)
++			this_chunk = nr_to_read;
+ 		err = __do_page_cache_readahead(mapping, filp,
+-						offset, this_chunk, 0);
++						offset, this_chunk, 0, 1);
+ 		if (err < 0) {
+ 			ret = err;
+ 			break;
+@@ -236,6 +287,7 @@ int force_page_cache_readahead(struct ad
+ 	}
+ 	return ret;
+ }
++#endif
+ 
+ /*
+  * Given a desired number of PAGE_CACHE_SIZE readahead pages, return a
+@@ -250,17 +302,32 @@ unsigned long max_sane_readahead(unsigne
+ /*
+  * Submit IO for the read-ahead request in file_ra_state.
+  */
++/* --YY-- */
+ unsigned long ra_submit(struct file_ra_state *ra,
+ 		       struct address_space *mapping, struct file *filp)
+ {
+ 	int actual;
+ 
+ 	actual = __do_page_cache_readahead(mapping, filp,
+-					ra->start, ra->size, ra->async_size);
++					ra->start, ra->size, ra->async_size, 0);
+ 
+ 	return actual;
+ }
+ 
++#ifdef NEW_ALLOC
++/* --YY-- */
++unsigned long color_ra_submit(struct file_ra_state *ra,
++		       struct address_space *mapping, struct file *filp)
++{
++	int actual;
++
++	actual = __do_page_cache_readahead(mapping, filp,
++					ra->start, ra->size, ra->async_size, 1);
++
++	return actual;
++}
++#endif
++
+ /*
+  * Set the initial window size, round to next power of 2 and square
+  * for small size, x 4 for medium, and x 2 for large
+@@ -394,11 +461,12 @@ static int try_context_readahead(struct 
+ /*
+  * A minimal readahead algorithm for trivial sequential/random reads.
+  */
++/* --YY-- */
+ static unsigned long
+ ondemand_readahead(struct address_space *mapping,
+ 		   struct file_ra_state *ra, struct file *filp,
+ 		   bool hit_readahead_marker, pgoff_t offset,
+-		   unsigned long req_size)
++		   unsigned long req_size, int color_on)
+ {
+ 	unsigned long max = max_sane_readahead(ra->ra_pages);
+ 
+@@ -467,7 +535,7 @@ ondemand_readahead(struct address_space 
+ 	 * standalone, small random read
+ 	 * Read as is, and do not pollute the readahead state.
+ 	 */
+-	return __do_page_cache_readahead(mapping, filp, offset, req_size, 0);
++	return __do_page_cache_readahead(mapping, filp, offset, req_size, 0, color_on);
+ 
+ initial_readahead:
+ 	ra->start = offset;
+@@ -485,9 +553,34 @@ readit:
+ 		ra->size += ra->async_size;
+ 	}
+ 
+-	return ra_submit(ra, mapping, filp);
++	if (color_on)
++		return color_ra_submit(ra, mapping, filp);
++	else
++		return ra_submit(ra, mapping, filp);
+ }
+ 
++#ifdef NEW_ALLOC
++/* --YY-- */
++void color_page_cache_sync_readahead(struct address_space *mapping,
++			       struct file_ra_state *ra, struct file *filp,
++			       pgoff_t offset, unsigned long req_size)
++{
++	/* no read-ahead */
++	if (!ra->ra_pages)
++		return;
++
++	/* be dumb */
++	if (filp && (filp->f_mode & FMODE_RANDOM)) {
++		color_force_page_cache_readahead(mapping, filp, offset, req_size);
++		return;
++	}
++
++	/* do read-ahead */
++	ondemand_readahead(mapping, ra, filp, false, offset, req_size, 1);
++}
++EXPORT_SYMBOL_GPL(color_page_cache_sync_readahead);
++#endif
++
+ /**
+  * page_cache_sync_readahead - generic file readahead
+  * @mapping: address_space which holds the pagecache and I/O vectors
+@@ -517,10 +610,43 @@ void page_cache_sync_readahead(struct ad
+ 	}
+ 
+ 	/* do read-ahead */
+-	ondemand_readahead(mapping, ra, filp, false, offset, req_size);
++	/* --YY-- */
++	ondemand_readahead(mapping, ra, filp, false, offset, req_size, 0);
+ }
+ EXPORT_SYMBOL_GPL(page_cache_sync_readahead);
+ 
++#ifdef NEW_ALLOC
++/* --YY-- */
++void
++color_page_cache_async_readahead(struct address_space *mapping,
++			   struct file_ra_state *ra, struct file *filp,
++			   struct page *page, pgoff_t offset,
++			   unsigned long req_size)
++{
++	/* no read-ahead */
++	if (!ra->ra_pages)
++		return;
++
++	/*
++	 * Same bit is used for PG_readahead and PG_reclaim.
++	 */
++	if (PageWriteback(page))
++		return;
++
++	ClearPageReadahead(page);
++
++	/*
++	 * Defer asynchronous read-ahead on IO congestion.
++	 */
++	if (bdi_read_congested(mapping->backing_dev_info))
++		return;
++
++	/* do read-ahead */
++	ondemand_readahead(mapping, ra, filp, true, offset, req_size, 1);
++}
++EXPORT_SYMBOL_GPL(color_page_cache_async_readahead);
++#endif
++
+ /**
+  * page_cache_async_readahead - file readahead for marked pages
+  * @mapping: address_space which holds the pagecache and I/O vectors
+@@ -561,7 +687,8 @@ page_cache_async_readahead(struct addres
+ 		return;
+ 
+ 	/* do read-ahead */
+-	ondemand_readahead(mapping, ra, filp, true, offset, req_size);
++	/* --YY-- */
++	ondemand_readahead(mapping, ra, filp, true, offset, req_size, 0);
+ }
+ EXPORT_SYMBOL_GPL(page_cache_async_readahead);
+ 
+diff -upNr -x '*.pdf' linux-3.8.8/mm/rmap.c linux-3.8.8-color/mm/rmap.c
+--- linux-3.8.8/mm/rmap.c	2013-04-17 01:11:28.000000000 -0400
++++ linux-3.8.8-color/mm/rmap.c	2014-06-10 11:08:18.690872000 -0400
+@@ -57,6 +57,8 @@
+ #include <linux/migrate.h>
+ #include <linux/hugetlb.h>
+ #include <linux/backing-dev.h>
++/* --YY-- */
++#include <linux/color_alloc.h>
+ 
+ #include <asm/tlbflush.h>
+ 
+@@ -1098,6 +1100,10 @@ void page_add_new_anon_rmap(struct page 
+ 	else
+ 		add_page_to_unevictable_list(page);
+ }
++#ifdef NEW_ALLOC
++/* --YY-- */
++EXPORT_SYMBOL(page_add_new_anon_rmap);
++#endif
+ 
+ /**
+  * page_add_file_rmap - add pte mapping to a file page
+@@ -1117,6 +1123,10 @@ void page_add_file_rmap(struct page *pag
+ 	}
+ 	mem_cgroup_end_update_page_stat(page, &locked, &flags);
+ }
++#ifdef NEW_ALLOC
++/* --YY-- */
++EXPORT_SYMBOL(page_add_file_rmap);
++#endif
+ 
+ /**
+  * page_remove_rmap - take down pte mapping from a page
+@@ -1200,6 +1210,10 @@ out:
+ 	if (!anon)
+ 		mem_cgroup_end_update_page_stat(page, &locked, &flags);
+ }
++#ifdef NEW_ALLOC
++/* --YY-- */
++EXPORT_SYMBOL(page_remove_rmap);
++#endif
+ 
+ /*
+  * Subfunctions of try_to_unmap: try_to_unmap_one called
