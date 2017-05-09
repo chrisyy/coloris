@@ -1,7 +1,11 @@
 What's included:
+
 -kernel patch for 3.8.8 i386
+
 -kernel config file
+
 -kernel module
+
 -user-level debugging tool (checker)
 
 
