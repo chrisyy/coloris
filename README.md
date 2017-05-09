@@ -11,11 +11,13 @@ What's included:
 
 Module usage:
 insmod alloc.ko apps=... qos_pair=...
+
 For apps parameter, pass in applications' process names (as in 
 task_struct->comm);
 For qos_pair, pass in application-specific QoS requirement (high thred, 
 low thred), which should be integers no larger than 100; set to any 
 negative integer if want to use system-wide thresholds;
+
 e.g.
 insmod alloc.ko apps=gobmk,hmmer qos_pair=70,30,-1,-1
 
@@ -23,6 +25,7 @@ Load the module first, then start applications.
 
 
 Notes:
+
 -Make sure the memory pool size is appropriate, given hardware RAM size, 
 since memory pool only takes memory pages from HighMem.
 
